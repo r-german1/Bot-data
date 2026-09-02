@@ -1,11 +1,31 @@
 import sqlite3
 import os
+import urllib.request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
-# توكنا بۆتی و خودانێ سەرەکی
-TOKEN = "BOT_TOKEN_HERE"
+# توکنا بۆتی و خودانێ سەرەکی
+TOKEN = "8759983367:AAHm1mNaJEbdDhKEZdtm3YmnF2CwAPmh8EE"
 OWNER = "YUSEEF_SURCHI"
+
+# لینکێن ڕاستەوخۆ یێن فایلێن داتابەیسێ ژ گیتهەب Releases
+DB_URLS = {
+    "duhok": "https://github.com/r-german1/Bot-data/releases/download/v1.0.0/duhok.db",
+    "erbil": "https://github.com/r-german1/Bot-data/releases/download/v1.0.0/erbil.db",
+    "kirkuk": "https://github.com/r-german1/Bot-data/releases/download/v1.0.0/kirkuk.db",
+    "sulaymaniyah": "https://github.com/r-german1/Bot-data/releases/download/v1.0.0/sulaymaniyah.db"
+}
+
+# دابەزاندنا فایلا داتابەیسێ ئەگەر ل سەر سێرڤەری نەبێت
+def ensure_database(city):
+    db_file = f"{city}.db"
+    if not os.path.exists(db_file):
+        print(f"📥 دابەزاندنا فایلا {db_file} ژ گیتهەب...")
+        try:
+            urllib.request.urlretrieve(DB_URLS[city], db_file)
+            print(f"✅ فایلا {db_file} ب سەرکەفتیانە هاتە دابەزاندن!")
+        except Exception as e:
+            print(f"❌ هەلە د دابەزاندنا {db_file} دا: {e}")
 
 # پەیاما /start و پێشوازیکرن
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,15 +81,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         city = data.split("_")[1]
         context.user_data['selected_city'] = city
         
-        # دیارکرنا ناڤێ فایلا داتابەیسێ بەپێی باژێری
-        db_files = {
-            "duhok": "duhok.db",
-            "erbil": "erbil.db",
-            "kirkuk": "kirkuk.db",
-            "sulaymaniyah": "sulaymaniyah.db"
-        }
+        await query.message.reply_text(f"⏳ ل چاڤەڕێ بان، پشکنین و ئامادەکرنا داتابەیسا {city.upper()}...")
+        ensure_database(city)
         
-        await query.message.reply_text(f"✅ تە باژێرێ {city.upper()} هەلبژارد.\n📂 فایلا داتابەیسێ: `{db_files[city]}`\n\nنۆکە ناڤێ کەسی (یان پشکەک ژ ناڤی) بنڤیسە بۆ گەرانێ:")
+        await query.message.reply_text(f"✅ تە باژێرێ {city.upper()} هەلبژارد و داتابەیس ئامادەیە.\n\nنۆکە ناڤێ کەسی (یان پشکەک ژ ناڤی) بنڤیسە بۆ گەرانێ:")
 
 # پشکا گەرانێ ل ناو داتابەیسێ
 async def search_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,29 +94,30 @@ async def search_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     city = context.user_data['selected_city']
     search_query = update.message.text.strip()
-    
-    # فایلا داتابەیسێ ya دەستنیشانکری
     db_file = f"{city}.db"
     
-    if not os.path.exists(db_file):
-        await update.message.reply_text(f"❌ فایلا داتابەیسێ `{db_file}` ل ڤی پوشتەی نینە! تکایە ڤرەکە ناو هەمەن فۆڵدەر.")
-        return
+    ensure_database(city)
     
     try:
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
-        # سەرنج: ئەگەر ناڤێ ستوونێن داتابەیسا تە جودا بن، دەستکارییا ڤی قەبارەی بکە
-        # ل ڤێرە مە گەران کریە ل سەر ناڤی، ناڤێ بابێ، سالا ژدایکبوونێ و هتد
-        query = "SELECT * FROM data WHERE full_name LIKE ? OR name LIKE ?"
-        
-        # لێرە مەیڵە ئەگەر ستوونا تە تنێ `name` یان `full_name` بێت، گۆڕانکاری تێدا بکە
-        # بۆ تاقیکرنێ مەیڵە گەرانەکا گشتی ل سەر ستوونێن سەرەکی بکە:
         cursor.execute("PRAGMA table_info(data);")
-        columns = [col[1] for col in cursor.fetchall()]
+        columns_info = cursor.fetchall()
         
-        # گەران ب رێکا LIKE ل سەر تابلۆیا سەرەکی
-        cursor.execute(f"SELECT * FROM data WHERE {columns[0]} LIKE ? LIMIT 5", ('%' + search_query + '%',))
+        if not columns_info:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            table_name = cursor.fetchone()[0]
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            columns_info = cursor.fetchall()
+            target_table = table_name
+        else:
+            target_table = "data"
+            
+        columns = [col[1] for col in columns_info]
+        search_column = columns[0] if columns else "full_name"
+        
+        cursor.execute(f"SELECT * FROM {target_table} WHERE {search_column} LIKE ? LIMIT 5", ('%' + search_query + '%',))
         results = cursor.fetchall()
         conn.close()
         
@@ -114,19 +130,7 @@ async def search_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ چ ئەنجام نەهاتن دیتن ل سەر ڤی ناڤی.")
             
     except Exception as e:
-        # ئەگەر ناڤێ تابلۆی یان ستوونان جودا بیت، دێ ڤی هەڵەی ڤەشێرێت یان نیشان دەت
-        try:
-            conn = sqlite3.connect(db_file)
-            cursor = conn.cursor()
-            # فەرمانا گەرانا گشتی بێ دیارکرنا ناڤێ ستوونی
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            table_name = cursor.fetchone()[0]
-            cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
-            sample = cursor.fetchall()
-            conn.close()
-            await update.message.reply_text(f"⚠️ ئەگەرەک هەبوو. ناڤێ تابلۆیا داتابەیسا تە: `{table_name}`\nنموونەیا داتایێ: {sample}")
-        except Exception as err:
-            await update.message.reply_text(f"⚠️ هەلە د خواندنا داتابەیسێ دا: {e}")
+        await update.message.reply_text(f"⚠️ هەلە د خواندنا داتابەیسێ دا: {e}")
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
